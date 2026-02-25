@@ -1,4 +1,5 @@
 {
-  "name": "Battery State Card (with Visual Editor)",
-  "render_readme": true
+  "name": "Battery State Card (Visual Editor)",
+  "render_readme": true,
+  "filename": "battery-state-card.js"
 }

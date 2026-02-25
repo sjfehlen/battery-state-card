@@ -1,21 +1,22 @@
 {
-  "name": "battery-state-card-with-editor",
+  "name": "battery-state-card-visual-editor",
   "version": "3.2.1",
-  "description": "Battery State Card for Home Assistant - Fork with full Visual Editor support",
+  "description": "Battery State Card for Home Assistant - Fork with full Visual UI Editor",
   "scripts": {
     "build": "node scripts/build.js",
     "build:editor": "node scripts/build.js --editor-only",
-    "dev": "node scripts/build.js --watch"
-  },
-  "devDependencies": {
-    "node-fetch": "^3.3.2"
+    "watch": "node scripts/build.js --watch"
   },
   "keywords": [
     "home-assistant",
     "lovelace",
     "battery",
-    "custom-card"
+    "custom-card",
+    "hacs"
   ],
-  "author": "fork with UI editor",
-  "license": "MIT"
+  "author": "sjfehlen",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  }
 }

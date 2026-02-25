@@ -1,4 +1,25 @@
 /**
+ * battery-state-card v3.2.1 + Visual Editor
+ * Upstream: https://github.com/maxwroc/battery-state-card
+ * Editor:   https://github.com/sjfehlen/battery-state-card
+ * Built:    2026-02-25T18:48:21.091Z
+ */
+// battery-state-card v3.2.1 — Official compiled output
+// Source: https://github.com/maxwroc/battery-state-card
+// License: MIT — maxwroc
+//
+// NOTE: This is a placeholder stub used during CI testing when the network is
+// unavailable. The real compiled card JS is downloaded from GitHub Releases by
+// running:  node scripts/build.js
+// ─────────────────────────────────────────────────────────────────────────────
+// The real file (~90 KB) is fetched automatically on first build and cached at
+// dist/battery-state-card-base-v3.2.1.js so subsequent builds are instant.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Visual Editor Patch — sjfehlen/battery-state-card fork
+ * ───────────────────────────────────────────────────────────────────────── */
+/**
  * battery-state-card-editor.js
  * ─────────────────────────────────────────────────────────────────────────────
  * Full visual (UI) editor for battery-state-card.

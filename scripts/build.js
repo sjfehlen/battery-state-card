@@ -1,183 +1,169 @@
 #!/usr/bin/env node
 /**
- * build.js — battery-state-card fork build script
- *
- * Downloads the official battery-state-card.js from the GitHub release,
- * appends our visual editor patch, and writes the combined file to dist/.
+ * build.js
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Downloads official battery-state-card.js from maxwroc's GitHub release,
+ * appends our visual editor patch, writes combined output to dist/.
  *
  * Usage:
- *   node scripts/build.js              — full build
- *   node scripts/build.js --editor-only — skip download, just re-append editor
+ *   node scripts/build.js               full build (download + combine)
+ *   node scripts/build.js --editor-only skip download, re-append editor only
+ *   node scripts/build.js --watch       rebuild editor on file-change
+ *   node scripts/build.js --version 3.2.1  use a specific upstream version
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 
-const https = require("https");
-const http = require("http");
-const fs = require("fs");
-const path = require("path");
+"use strict";
 
-const BASE_VERSION = "3.2.1";
-const BASE_URL = `https://github.com/maxwroc/battery-state-card/releases/download/v${BASE_VERSION}/battery-state-card.js`;
-const BASE_CACHE = path.join(__dirname, "..", "dist", `battery-state-card-base-v${BASE_VERSION}.js`);
-const EDITOR_SRC = path.join(__dirname, "..", "src", "editor", "battery-state-card-editor.js");
-const OUTPUT = path.join(__dirname, "..", "dist", "battery-state-card.js");
+const https   = require("https");
+const http    = require("http");
+const fs      = require("fs");
+const path    = require("path");
 
-const DIST_DIR = path.join(__dirname, "..", "dist");
+// ── Configuration ─────────────────────────────────────────────────────────────
 
-const ARGS = process.argv.slice(2);
-const EDITOR_ONLY = ARGS.includes("--editor-only");
-const WATCH = ARGS.includes("--watch");
+const ARGS         = new Set(process.argv.slice(2));
+const EDITOR_ONLY  = ARGS.has("--editor-only");
+const WATCH_MODE   = ARGS.has("--watch");
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function log(msg) {
-  const now = new Date().toLocaleTimeString();
-  console.log(`[${now}] ${msg}`);
+// Allow --version X.Y.Z override
+let BASE_VERSION = "3.2.1";
+const vIdx = process.argv.indexOf("--version");
+if (vIdx !== -1 && process.argv[vIdx + 1]) {
+  BASE_VERSION = process.argv[vIdx + 1];
 }
 
-function downloadFile(url, dest) {
+const ROOT       = path.resolve(__dirname, "..");
+const DIST_DIR   = path.join(ROOT, "dist");
+const BASE_URL   = `https://github.com/maxwroc/battery-state-card/releases/download/v${BASE_VERSION}/battery-state-card.js`;
+const BASE_CACHE = path.join(DIST_DIR, `battery-state-card-base-v${BASE_VERSION}.js`);
+const EDITOR_SRC = path.join(ROOT, "src", "editor", "battery-state-card-editor.js");
+const OUTPUT     = path.join(DIST_DIR, "battery-state-card.js");
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+const ts  = () => new Date().toLocaleTimeString("en-US", { hour12: false });
+const log = (msg) => console.log(`[${ts()}] ${msg}`);
+const err = (msg) => console.error(`[${ts()}] ❌ ${msg}`);
+
+function fmtBytes(n) {
+  if (n < 1024)       return n + " B";
+  if (n < 1048576)    return (n / 1024).toFixed(1) + " KB";
+  return (n / 1048576).toFixed(2) + " MB";
+}
+
+// ── Downloader (follows redirects) ───────────────────────────────────────────
+
+function get(url) {
   return new Promise((resolve, reject) => {
-    log(`Downloading: ${url}`);
-    const file = fs.createWriteStream(dest);
-    const protocol = url.startsWith("https") ? https : http;
+    const mod = url.startsWith("https://") ? https : http;
+    mod.get(url, { headers: { "User-Agent": "battery-state-card-build/1.0" } }, (res) => {
+      const { statusCode, headers } = res;
 
-    function request(url) {
-      protocol.get(url, res => {
-        // Follow redirects (GitHub releases redirect to codeload.github.com)
-        if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307) {
-          const redirectUrl = res.headers.location;
-          log(`Redirecting to: ${redirectUrl}`);
-          file.close();
-          // Use correct protocol for redirect
-          const rProto = redirectUrl.startsWith("https") ? https : http;
-          rProto.get(redirectUrl, res2 => {
-            if (res2.statusCode !== 200) {
-              reject(new Error(`Download failed: HTTP ${res2.statusCode} at ${redirectUrl}`));
-              return;
-            }
-            const newFile = fs.createWriteStream(dest);
-            res2.pipe(newFile);
-            newFile.on("finish", () => {
-              newFile.close(() => {
-                log(`Downloaded successfully (${formatBytes(fs.statSync(dest).size)})`);
-                resolve();
-              });
-            });
-            newFile.on("error", reject);
-          }).on("error", reject);
-          return;
-        }
+      if (statusCode === 301 || statusCode === 302 || statusCode === 307 || statusCode === 308) {
+        res.resume();
+        return get(headers.location).then(resolve, reject);
+      }
 
-        if (res.statusCode !== 200) {
-          reject(new Error(`Download failed: HTTP ${res.statusCode} for ${url}`));
-          return;
-        }
+      if (statusCode !== 200) {
+        res.resume();
+        return reject(new Error(`HTTP ${statusCode} — ${url}`));
+      }
 
-        res.pipe(file);
-        file.on("finish", () => {
-          file.close(() => {
-            log(`Downloaded successfully (${formatBytes(fs.statSync(dest).size)})`);
-            resolve();
-          });
-        });
-        file.on("error", reject);
-      }).on("error", reject);
-    }
-
-    request(url);
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end",  () => resolve(Buffer.concat(chunks)));
+      res.on("error", reject);
+    }).on("error", reject);
   });
 }
 
-function formatBytes(bytes) {
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+async function download(url, dest) {
+  log(`Downloading ${path.basename(dest)} from upstream...`);
+  const buf = await get(url);
+  fs.writeFileSync(dest, buf);
+  log(`Saved ${path.basename(dest)} (${fmtBytes(buf.length)})`);
 }
 
-// ── Build ────────────────────────────────────────────────────────────────────
+// ── Build ─────────────────────────────────────────────────────────────────────
 
 async function build() {
   // Ensure dist/ exists
-  if (!fs.existsSync(DIST_DIR)) {
-    fs.mkdirSync(DIST_DIR, { recursive: true });
-  }
+  if (!fs.existsSync(DIST_DIR)) fs.mkdirSync(DIST_DIR, { recursive: true });
 
-  // Step 1: Get the official base JS
+  // ── Step 1: obtain base JS ──────────────────────────────────────────────────
   if (!EDITOR_ONLY) {
     if (fs.existsSync(BASE_CACHE)) {
-      log(`Using cached base JS: ${path.basename(BASE_CACHE)}`);
+      log(`Using cached base: ${path.basename(BASE_CACHE)} (${fmtBytes(fs.statSync(BASE_CACHE).size)})`);
     } else {
-      log(`Downloading official battery-state-card v${BASE_VERSION}...`);
       try {
-        await downloadFile(BASE_URL, BASE_CACHE);
-      } catch (err) {
-        // Try alternate URL format
-        const altUrl = `https://github.com/maxwroc/battery-state-card/releases/download/v${BASE_VERSION}/battery-state-card.js`;
-        log(`Primary download failed: ${err.message}`);
-        log(`Trying alternate URL...`);
-        try {
-          await downloadFile(altUrl, BASE_CACHE);
-        } catch (err2) {
-          console.error(`\n❌ Could not download base JS: ${err2.message}`);
-          console.error(`\nManual fix: Download battery-state-card.js from:`);
-          console.error(`  https://github.com/maxwroc/battery-state-card/releases/tag/v${BASE_VERSION}`);
-          console.error(`and save it to: ${BASE_CACHE}\n`);
-          process.exit(1);
-        }
+        await download(BASE_URL, BASE_CACHE);
+      } catch (e) {
+        err(`Could not download upstream JS: ${e.message}`);
+        err(`Download manually from: https://github.com/maxwroc/battery-state-card/releases/tag/v${BASE_VERSION}`);
+        err(`Save it to: ${BASE_CACHE}`);
+        process.exit(1);
       }
     }
   } else {
     if (!fs.existsSync(BASE_CACHE)) {
-      console.error(`\n❌ --editor-only specified but base JS not found at:\n  ${BASE_CACHE}`);
-      console.error(`Run 'node scripts/build.js' first (without --editor-only) to download it.\n`);
+      err(`--editor-only: cached base not found at ${BASE_CACHE}`);
+      err(`Run without --editor-only first.`);
       process.exit(1);
     }
-    log(`--editor-only: Reusing cached base JS`);
+    log(`--editor-only: reusing ${path.basename(BASE_CACHE)}`);
   }
 
-  // Step 2: Read both files
-  log("Reading base JS...");
-  const baseJs = fs.readFileSync(BASE_CACHE, "utf8");
-
-  log("Reading editor patch...");
+  // ── Step 2: read both files ─────────────────────────────────────────────────
+  const baseJs   = fs.readFileSync(BASE_CACHE, "utf8");
   const editorJs = fs.readFileSync(EDITOR_SRC, "utf8");
 
-  // Step 3: Combine
-  log("Combining files...");
-  const separator = `\n\n/* ─────────────────────────────────────────────────────────────────────
- * Visual Editor Patch — battery-state-card fork
- * Appended by build.js — https://github.com/YOUR_USERNAME/battery-state-card
- * ───────────────────────────────────────────────────────────────────── */\n\n`;
+  // ── Step 3: combine ─────────────────────────────────────────────────────────
+  const banner = [
+    "/**",
+    ` * battery-state-card v${BASE_VERSION} + Visual Editor`,
+    ` * Upstream: https://github.com/maxwroc/battery-state-card`,
+    ` * Editor:   https://github.com/sjfehlen/battery-state-card`,
+    ` * Built:    ${new Date().toISOString()}`,
+    " */",
+    "",
+  ].join("\n");
 
-  const combined = baseJs + separator + editorJs;
+  const divider = [
+    "",
+    "/* ─────────────────────────────────────────────────────────────────────────",
+    " * Visual Editor Patch — sjfehlen/battery-state-card fork",
+    " * ───────────────────────────────────────────────────────────────────────── */",
+    "",
+  ].join("\n");
 
-  // Step 4: Write output
+  const combined = banner + baseJs + divider + editorJs;
   fs.writeFileSync(OUTPUT, combined, "utf8");
 
-  const finalSize = formatBytes(fs.statSync(OUTPUT).size);
-  log(`✅ Built: ${OUTPUT} (${finalSize})`);
-  console.log("\n📦 Output: dist/battery-state-card.js");
-  console.log("   Drop this file into config/www/ in your Home Assistant instance.\n");
+  log(`✅  Built: dist/battery-state-card.js (${fmtBytes(fs.statSync(OUTPUT).size)})`);
+  console.log("\n  → Copy dist/battery-state-card.js to config/www/ in Home Assistant\n");
 }
 
-// ── Watch mode ───────────────────────────────────────────────────────────────
+// ── Watch ─────────────────────────────────────────────────────────────────────
 
 function watch() {
-  build().catch(console.error);
+  build().catch((e) => err(e.message));
 
-  log(`Watching for changes in ${EDITOR_SRC}...`);
+  log(`Watching: ${path.relative(ROOT, EDITOR_SRC)}`);
+  let debounce;
   fs.watch(EDITOR_SRC, () => {
-    log("Editor file changed — rebuilding...");
-    build().catch(console.error);
+    clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      log("Change detected — rebuilding…");
+      build().catch((e) => err(e.message));
+    }, 100);
   });
 }
 
-// ── Main ─────────────────────────────────────────────────────────────────────
+// ── Entry ─────────────────────────────────────────────────────────────────────
 
-if (WATCH) {
+if (WATCH_MODE) {
   watch();
 } else {
-  build().catch(err => {
-    console.error("Build failed:", err);
-    process.exit(1);
-  });
+  build().catch((e) => { err(e.message); process.exit(1); });
 }
