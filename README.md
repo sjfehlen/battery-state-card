@@ -10,7 +10,7 @@ A fork of [maxwroc/battery-state-card](https://github.com/maxwroc/battery-state-
 
 ---
 
-## What's New in This Fork
+## What's New in This Fork 
 
 The original card shows **"Visual editor not supported"** when you try to edit it through the HA dashboard. This fork fixes that with a full 5-tab GUI editor:
 
